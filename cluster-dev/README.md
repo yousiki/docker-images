@@ -19,6 +19,26 @@ A reproducible Docker image for deep-learning development on GPU clusters. Each 
 
 The default user is `dev` (UID/GID 1000) with passwordless `sudo` and `zsh` as login shell. PID 1 is `tini` so signals (Ctrl-C, SIGTERM) propagate cleanly into long-running training jobs.
 
+## `:cpu` — CPU-only variant (no CUDA)
+
+Same toolchain as the full image, but built on plain Ubuntu instead of
+`nvidia/cuda:*-cudnn-devel`. Useful for debugging CPU-only workloads on a
+laptop or CI runner, or smoke-testing scripts before booking a GPU node.
+Pulls a much smaller image since the CUDA / cuDNN layers are gone.
+
+Built from `Dockerfile.cpu` and published as:
+
+```
+ghcr.io/yousiki/cluster-dev:cpu
+ghcr.io/yousiki/cluster-dev:cpu-sha-<short>
+```
+
+Run it without `--gpus`:
+
+```bash
+docker run --rm -it ghcr.io/yousiki/cluster-dev:cpu
+```
+
 ## `:base` — minimal smoke-test variant
 
 A second, intentionally-minimal image is published alongside the full one for
@@ -107,13 +127,14 @@ docker.io/<DOCKERHUB_USERNAME>/cluster-dev:<tag>
 
 The Docker Hub copy is produced by a `regctl image copy` step that runs after the GHCR push. We don't ask buildx to push to both registries directly because Docker Hub's CDN rejects buildx's monolithic blob PUT with `400 Bad request` for the large cudnn-devel layer; regctl uses chunked uploads which work regardless of layer size.
 
-Two variants are built in parallel via a workflow matrix:
+Three variants are built in parallel via a workflow matrix:
 
 | Variant | Dockerfile | Tags on `main` | Tags on commit / PR / branch / version |
 |---------|-----------|----------------|----------------------------------------|
 | Full    | `Dockerfile`      | `latest` | `sha-<short>`, `<branch>`, `pr-<n>`, `<version>` |
 | Base    | `Dockerfile.base` | `base`   | `base-sha-<short>`, `base-<branch>`, `base-pr-<n>`, `base-<version>` |
+| CPU     | `Dockerfile.cpu`  | `cpu`    | `cpu-sha-<short>`, `cpu-<branch>`, `cpu-pr-<n>`, `cpu-<version>` |
 
 `<version>` is extracted from `cluster-dev/v<version>` tags. Pull requests build but do not push.
 
-GHA cache is scoped per-variant (`scope=cluster-dev`, `scope=cluster-dev-base`) so the variants don't trash each other's cache.
+GHA cache is scoped per-variant (`scope=cluster-dev`, `scope=cluster-dev-base`, `scope=cluster-dev-cpu`) so the variants don't trash each other's cache.

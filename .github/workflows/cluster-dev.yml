@@ -54,6 +54,13 @@ jobs:
             latest_value: base
             tag_prefix: "base-"
             free_disk: false
+          # CPU-only image: full toolchain on plain Ubuntu (no CUDA)
+          - variant: cpu
+            dockerfile: cluster-dev/Dockerfile.cpu
+            cache_scope: cluster-dev-cpu
+            latest_value: cpu
+            tag_prefix: "cpu-"
+            free_disk: false
 
     steps:
       # GHA runners only have ~14GB free; CUDA-cudnn-devel + tooling exceeds
