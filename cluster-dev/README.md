@@ -98,19 +98,22 @@ docker run --rm -it --gpus all \
 
 Pull requests build but do not push.
 
-Images are pushed to **GHCR** (always) and **Docker Hub** (when `DOCKERHUB_USERNAME` repo variable is set — see [DOCKERHUB.md](./DOCKERHUB.md) for the one-time setup):
+Images are pushed to:
+
+- **GHCR** — always, both variants.
+- **Docker Hub** — `:base` variant only, when `DOCKERHUB_USERNAME` repo variable is set (see [DOCKERHUB.md](./DOCKERHUB.md) for the one-time setup). The `full` variant is GHCR-only because its cudnn-devel layer exceeds Docker Hub's per-blob upload limit (the API returns `400 Bad request` on the monolithic PUT).
 
 ```
-ghcr.io/yousiki/cluster-dev:<tag>
-docker.io/<DOCKERHUB_USERNAME>/cluster-dev:<tag>
+ghcr.io/yousiki/cluster-dev:<tag>           # full + base variants
+docker.io/<DOCKERHUB_USERNAME>/cluster-dev:base[-...]   # base variant only
 ```
 
 Two variants are built in parallel via a workflow matrix:
 
-| Variant | Dockerfile | Tags on `main` | Tags on commit / PR / branch / version |
-|---------|-----------|----------------|----------------------------------------|
-| Full    | `Dockerfile`      | `latest` | `sha-<short>`, `<branch>`, `pr-<n>`, `<version>` |
-| Base    | `Dockerfile.base` | `base`   | `base-sha-<short>`, `base-<branch>`, `base-pr-<n>`, `base-<version>` |
+| Variant | Dockerfile | Registries | Tags on `main` | Tags on commit / PR / branch / version |
+|---------|-----------|-----------|----------------|----------------------------------------|
+| Full    | `Dockerfile`      | GHCR        | `latest` | `sha-<short>`, `<branch>`, `pr-<n>`, `<version>` |
+| Base    | `Dockerfile.base` | GHCR + DH   | `base`   | `base-sha-<short>`, `base-<branch>`, `base-pr-<n>`, `base-<version>` |
 
 `<version>` is extracted from `cluster-dev/v<version>` tags. Pull requests build but do not push.
 

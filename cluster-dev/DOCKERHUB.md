@@ -1,9 +1,14 @@
 # Docker Hub publishing — one-time setup
 
 GHCR is blocked from some networks (e.g. parts of Alibaba Cloud). The workflow
-mirrors every push to Docker Hub when these two GitHub settings are configured.
-Until they are configured, the workflow silently skips Docker Hub and continues
-to push to GHCR only.
+mirrors the **`:base` variant** to Docker Hub when these two GitHub settings
+are configured. Until they are configured, the workflow silently skips Docker
+Hub and continues to push to GHCR only.
+
+> The full `:latest` variant is GHCR-only — the cudnn-devel layer exceeds
+> Docker Hub's per-blob upload limit (the API returns `400 Bad request` on
+> the monolithic PUT). The full image is also unnecessary on Docker Hub:
+> it's only useful from networks that already reach GHCR fine.
 
 ## 1 — Create a Docker Hub access token
 
@@ -67,10 +72,12 @@ login step — let me know and I'll wire it in.
 
 ```yaml
 - name: Log in to Docker Hub
-  if: github.event_name != 'pull_request' && vars.DOCKERHUB_USERNAME != ''
+  if: github.event_name != 'pull_request' && matrix.push_dockerhub && vars.DOCKERHUB_USERNAME != ''
   ...
 ```
 
-`vars.DOCKERHUB_USERNAME` evaluates to an empty string when the variable is
-unset, so the step is skipped and `docker/metadata-action` only emits GHCR
-tags. Once you set the variable, both registries get tagged automatically.
+The login is gated by both `matrix.push_dockerhub` (only the `base` variant
+sets this to `true`) and `vars.DOCKERHUB_USERNAME` (empty string when unset).
+The image-name list passed to `docker/metadata-action` is gated the same way,
+so when either condition is false the action only emits GHCR tags and Docker
+Hub is bypassed cleanly.

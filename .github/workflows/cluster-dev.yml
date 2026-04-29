@@ -41,19 +41,27 @@ jobs:
       matrix:
         include:
           # Full image: CUDA-cudnn-devel + uv/bun/node + zellij/tmux + btop/gdu/yazi
+          # GHCR only — the cudnn-devel layer is too large for Docker Hub's
+          # blob upload API (returns 400 on the monolithic PUT). The full
+          # image is also unnecessary on Docker Hub: it's only useful from
+          # networks that already reach GHCR fine.
           - variant: full
             dockerfile: cluster-dev/Dockerfile
             cache_scope: cluster-dev
             latest_value: latest
             tag_prefix: ""
             free_disk: true
+            push_dockerhub: false
           # Minimal smoke-test image: CUDA-base + uv + bun
+          # Pushed to both registries — Docker Hub is the fallback for
+          # clusters where GHCR is blocked (e.g. Alibaba Cloud).
           - variant: base
             dockerfile: cluster-dev/Dockerfile.base
             cache_scope: cluster-dev-base
             latest_value: base
             tag_prefix: "base-"
             free_disk: false
+            push_dockerhub: true
 
     steps:
       # GHA runners only have ~14GB free; CUDA-cudnn-devel + tooling exceeds
@@ -88,10 +96,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Docker Hub login is conditional on the secret being set, so the
-      # workflow keeps working before the user has configured the secrets.
+      # Docker Hub login is conditional on (a) the secret being set, and
+      # (b) the matrix variant opting in — the `full` variant is too large
+      # for Docker Hub's blob API.
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request' && vars.DOCKERHUB_USERNAME != ''
+        if: github.event_name != 'pull_request' && matrix.push_dockerhub && vars.DOCKERHUB_USERNAME != ''
         uses: docker/login-action@v3
         with:
           registry: ${{ env.DOCKERHUB_REGISTRY }}
@@ -102,11 +111,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # Push to both registries when DOCKERHUB_USERNAME is configured;
-          # otherwise GHCR only.
+          # Always push to GHCR. Push to Docker Hub only when this matrix
+          # variant opts in AND DOCKERHUB_USERNAME is configured.
           images: |
             ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/{1}/{2}', env.DOCKERHUB_REGISTRY, vars.DOCKERHUB_USERNAME, env.IMAGE_NAME) || '' }}
+            ${{ matrix.push_dockerhub && vars.DOCKERHUB_USERNAME != '' && format('{0}/{1}/{2}', env.DOCKERHUB_REGISTRY, vars.DOCKERHUB_USERNAME, env.IMAGE_NAME) || '' }}
           tags: |
             type=raw,value=${{ matrix.latest_value }},enable={{is_default_branch}}
             type=ref,event=branch,prefix=${{ matrix.tag_prefix }}
