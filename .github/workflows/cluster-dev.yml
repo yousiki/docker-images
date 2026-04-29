@@ -15,13 +15,15 @@ on:
   workflow_dispatch:
     inputs:
       push:
-        description: 'Push image to GHCR (otherwise build only)'
+        description: 'Push image to registries (otherwise build only)'
         type: boolean
         default: true
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/cluster-dev
+  # Image name suffix is the same on both registries: <owner>/cluster-dev
+  IMAGE_NAME: cluster-dev
+  GHCR_REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
 
 concurrency:
   group: cluster-dev-${{ github.ref }}
@@ -82,15 +84,29 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Docker Hub login is conditional on the secret being set, so the
+      # workflow keeps working before the user has configured the secrets.
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request' && vars.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Compute image tags / labels
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Push to both registries when DOCKERHUB_USERNAME is configured;
+          # otherwise GHCR only.
+          images: |
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/{1}/{2}', env.DOCKERHUB_REGISTRY, vars.DOCKERHUB_USERNAME, env.IMAGE_NAME) || '' }}
           tags: |
             type=raw,value=${{ matrix.latest_value }},enable={{is_default_branch}}
             type=ref,event=branch,prefix=${{ matrix.tag_prefix }}
