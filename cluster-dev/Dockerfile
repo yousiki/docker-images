@@ -160,7 +160,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY --from=downloader /out/ /
 
 # ---- Non-root user (commonly remapped at runtime via `docker run --user`) -
-RUN groupadd --gid ${USER_GID} ${USERNAME} \
+# Ubuntu 24.04 ships a default `ubuntu` user/group at UID/GID 1000;
+# remove it first so we can claim that UID for our `dev` user.
+RUN if id ubuntu >/dev/null 2>&1;        then userdel --remove ubuntu 2>/dev/null || userdel ubuntu; fi \
+ && if getent group ubuntu >/dev/null;   then groupdel ubuntu; fi \
+ && groupadd --gid ${USER_GID} ${USERNAME} \
  && useradd  --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /usr/bin/zsh ${USERNAME} \
  && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
  && chmod 0440 /etc/sudoers.d/${USERNAME}
