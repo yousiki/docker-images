@@ -98,12 +98,14 @@ docker run --rm -it --gpus all \
 
 Pull requests build but do not push.
 
-Images are pushed to **GHCR** (always) and **Docker Hub** (when `DOCKERHUB_USERNAME` repo variable is set — see [DOCKERHUB.md](./DOCKERHUB.md) for the one-time setup):
+Images are pushed to **GHCR** (always, both variants) and **Docker Hub** (both variants, when `DOCKERHUB_USERNAME` repo variable is set — see [DOCKERHUB.md](./DOCKERHUB.md) for the one-time setup):
 
 ```
 ghcr.io/yousiki/cluster-dev:<tag>
 docker.io/<DOCKERHUB_USERNAME>/cluster-dev:<tag>
 ```
+
+The Docker Hub copy is produced by a `regctl image copy` step that runs after the GHCR push. We don't ask buildx to push to both registries directly because Docker Hub's CDN rejects buildx's monolithic blob PUT with `400 Bad request` for the large cudnn-devel layer; regctl uses chunked uploads which work regardless of layer size.
 
 Two variants are built in parallel via a workflow matrix:
 
