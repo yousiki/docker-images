@@ -1,24 +1,52 @@
 # syntax=docker.io/docker/dockerfile:1.7
 
-# ---- Build args (override with --build-arg) -----------------------------
-# Pinned to latest stable NVIDIA CUDA release at build time.
-# Override with --build-arg CUDA_VERSION=... if you need a different toolkit.
+# ============================================================
+# cluster-dev — DL development image for GPU clusters
+# Each tool is installed by its upstream-recommended path:
+#   - uv     : COPY from ghcr.io/astral-sh/uv  (Astral docs)
+#   - bun    : COPY from oven/bun:*-debian      (matches glibc target)
+#   - node   : COPY from node:22-bookworm-slim  (nodejs/docker-node Best Practices)
+#   - btop   : `make install` from upstream musl release tarball
+#   - gdu    : static binary release
+#   - yazi   : musl release zip
+#   - zellij : static musl release tarball
+#   - tmux / zsh / htop / build tooling : Ubuntu apt
+# ============================================================
+
+# ---- Base image ---------------------------------------------------------
 ARG CUDA_VERSION=13.0.1
 ARG UBUNTU_VERSION=24.04
 ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
 
+# ---- Pinned upstream tool images (override with --build-arg) ------------
+ARG UV_VERSION=0.11.8
+ARG BUN_TAG=1-debian
+ARG NODE_TAG=22-bookworm-slim
+
+# ---- Pinned versions for tools fetched from GitHub releases -------------
+ARG BTOP_VERSION=1.4.6
+ARG GDU_VERSION=5.36.0
+ARG YAZI_VERSION=26.1.22
+ARG ZELLIJ_VERSION=0.44.1
+
+
 # ============================================================
-# Stage 1 — Downloader: fetch single-binary tools into /out
-# Uses a small base; binaries are extracted, not executed here.
+# Source stages — pinned upstream official images we COPY from
+# ============================================================
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-src
+FROM oven/bun:${BUN_TAG}                AS bun-src
+FROM node:${NODE_TAG}                   AS node-src
+
+
+# ============================================================
+# Downloader stage — for tools without an official Docker image
 # ============================================================
 FROM debian:bookworm-slim AS downloader
 
-ARG TARGETARCH=amd64
-ARG UV_VERSION=0.5.18
-ARG BUN_VERSION=1.1.42
-ARG GDU_VERSION=5.30.1
-ARG YAZI_VERSION=0.4.2
-ARG ZELLIJ_VERSION=0.41.2
+ARG BTOP_VERSION
+ARG GDU_VERSION
+ARG YAZI_VERSION
+ARG ZELLIJ_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -27,81 +55,48 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-        ca-certificates curl tar unzip xz-utils \
+        ca-certificates curl tar bzip2 unzip make \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/dl
 
-# uv (astral-sh) — Python env / project / interpreter manager
+# btop — upstream musl release (themes/assets included via `make install`)
 RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) T=x86_64-unknown-linux-gnu ;; \
-      arm64) T=aarch64-unknown-linux-gnu ;; \
-      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fL --retry 3 -o uv.tar.gz \
-      "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${T}.tar.gz"; \
-    tar -xzf uv.tar.gz; \
-    install -Dm755 "uv-${T}/uv"  /out/usr/local/bin/uv; \
-    install -Dm755 "uv-${T}/uvx" /out/usr/local/bin/uvx
+    curl -fsSL -o btop.tbz \
+      "https://github.com/aristocratos/btop/releases/download/v${BTOP_VERSION}/btop-x86_64-unknown-linux-musl.tbz"; \
+    tar -xjf btop.tbz; \
+    cd btop && PREFIX=/out/usr/local make install
 
-# bun — JS runtime / package runner
+# gdu — single static binary
 RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) T=linux-x64 ;; \
-      arm64) T=linux-aarch64 ;; \
-      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fL --retry 3 -o bun.zip \
-      "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-${T}.zip"; \
-    unzip -q bun.zip; \
-    install -Dm755 "bun-${T}/bun" /out/usr/local/bin/bun; \
-    ln -s bun /out/usr/local/bin/bunx
-
-# gdu — disk usage analyzer
-RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) T=linux_amd64_static ;; \
-      arm64) T=linux_arm64_static ;; \
-      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fL --retry 3 -o gdu.tgz \
-      "https://github.com/dundee/gdu/releases/download/v${GDU_VERSION}/gdu_${T}.tgz"; \
+    curl -fsSL -o gdu.tgz \
+      "https://github.com/dundee/gdu/releases/download/v${GDU_VERSION}/gdu_linux_amd64_static.tgz"; \
     tar -xzf gdu.tgz; \
-    install -Dm755 "gdu_${T}" /out/usr/local/bin/gdu
+    install -Dm755 gdu_linux_amd64_static /out/usr/local/bin/gdu
 
-# yazi — terminal file manager
+# yazi — extract `yazi` and `ya` from musl zip
 RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) T=x86_64-unknown-linux-gnu ;; \
-      arm64) T=aarch64-unknown-linux-gnu ;; \
-      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fL --retry 3 -o yazi.zip \
-      "https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-${T}.zip"; \
-    unzip -q yazi.zip; \
-    install -Dm755 "yazi-${T}/yazi" /out/usr/local/bin/yazi; \
-    install -Dm755 "yazi-${T}/ya"   /out/usr/local/bin/ya
+    curl -fsSL -o yazi.zip \
+      "https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-x86_64-unknown-linux-musl.zip"; \
+    mkdir -p /out/usr/local/bin; \
+    unzip -j yazi.zip \
+        "yazi-x86_64-unknown-linux-musl/yazi" \
+        "yazi-x86_64-unknown-linux-musl/ya" \
+        -d /out/usr/local/bin/; \
+    chmod 0755 /out/usr/local/bin/yazi /out/usr/local/bin/ya
 
-# zellij — modern terminal multiplexer
+# zellij — single static musl binary
 RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) T=x86_64-unknown-linux-musl ;; \
-      arm64) T=aarch64-unknown-linux-musl ;; \
-      *) echo "unsupported arch: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fL --retry 3 -o zellij.tgz \
-      "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-${T}.tar.gz"; \
-    tar -xzf zellij.tgz; \
-    install -Dm755 zellij /out/usr/local/bin/zellij
+    mkdir -p /out/usr/local/bin; \
+    curl -fsSL "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz" \
+      | tar -xz -C /out/usr/local/bin zellij
 
 
 # ============================================================
-# Stage 2 — Final image
+# Final image
 # ============================================================
 FROM ${BASE_IMAGE}
 
-ARG NODE_MAJOR=22
 ARG USERNAME=dev
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -111,14 +106,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=C.UTF-8 \
     TZ=UTC \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_LINK_MODE=copy
+    PYTHONUNBUFFERED=1
 
 LABEL org.opencontainers.image.title="cluster-dev" \
-      org.opencontainers.image.description="Deep-learning development environment for GPU clusters (CUDA + uv/bun/node + zellij/tmux + btop/gdu/yazi)" \
+      org.opencontainers.image.description="DL development image for GPU clusters (CUDA + uv/bun/node + zellij/tmux + btop/gdu/yazi)" \
       org.opencontainers.image.licenses="MIT"
 
-# ---- System packages (all under one cached layer) -------------------------
+# ---- System packages -----------------------------------------------------
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
@@ -137,46 +131,53 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         python3 python3-venv python3-pip \
         # Shell + multiplexer + monitor
         zsh zsh-autosuggestions zsh-syntax-highlighting \
-        tmux htop btop \
-        # Quality-of-life CLIs
+        tmux htop \
+        # QoL CLIs
         jq ripgrep fd-find bat tree man-db \
  && rm -rf /var/lib/apt/lists/*
 
-# Convenience symlinks (Ubuntu ships fd as fdfind, bat as batcat)
 RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd \
  && ln -sf /usr/bin/batcat /usr/local/bin/bat
 
-# ---- Node.js + npm (bun's fallback runtime) -------------------------------
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    set -eux; \
-    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -; \
-    apt-get install -y --no-install-recommends nodejs; \
-    rm -rf /var/lib/apt/lists/*; \
+# ---- uv (Astral's official pattern: COPY from distroless image) ---------
+COPY --from=uv-src /uv /uvx /usr/local/bin/
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+# ---- bun (COPY from oven/bun:*-debian; glibc-compatible) ----------------
+COPY --from=bun-src /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
+ENV BUN_INSTALL=/usr/local
+
+# ---- Node.js + npm (COPY from node:22-bookworm-slim, recreate symlinks) -
+COPY --from=node-src /usr/local/bin/node         /usr/local/bin/node
+COPY --from=node-src /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN set -eux; \
+    ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
+    if [ -e /usr/local/lib/node_modules/corepack/dist/corepack.js ]; then \
+        ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack; \
+    fi; \
     npm config set fund false --global; \
     npm config set update-notifier false --global
 
-# ---- Pull binaries collected in the downloader stage ----------------------
+# ---- Tools from downloader stage (btop / gdu / yazi / zellij) -----------
 COPY --from=downloader /out/ /
 
-# ---- Non-root user (commonly remapped at runtime via `docker run --user`) -
-# Ubuntu 24.04 ships a default `ubuntu` user/group at UID/GID 1000;
-# remove it first so we can claim that UID for our `dev` user.
+# ---- Non-root user (Ubuntu 24.04 ships `ubuntu` at UID 1000) ------------
 RUN if id ubuntu >/dev/null 2>&1;        then userdel --remove ubuntu 2>/dev/null || userdel ubuntu; fi \
  && if getent group ubuntu >/dev/null;   then groupdel ubuntu; fi \
  && groupadd --gid ${USER_GID} ${USERNAME} \
  && useradd  --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /usr/bin/zsh ${USERNAME} \
  && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
- && chmod 0440 /etc/sudoers.d/${USERNAME}
+ && chmod 0440 /etc/sudoers.d/${USERNAME} \
+ && chsh -s /usr/bin/zsh root
 
-# Make zsh the default login shell system-wide too (so `su -`, `sudo -i`, etc. land in zsh)
-RUN chsh -s /usr/bin/zsh root
-
-# ---- User dotfiles --------------------------------------------------------
+# ---- User dotfiles ------------------------------------------------------
 COPY --chown=${USERNAME}:${USERNAME} zshrc     /home/${USERNAME}/.zshrc
 COPY --chown=${USERNAME}:${USERNAME} tmux.conf /home/${USERNAME}/.tmux.conf
 
-# ---- Build-time sanity check (fails the build if any tool is broken) ------
+# ---- Build-time sanity check (fails the build if any tool is broken) ----
 RUN set -eux; \
     uv --version; uvx --version; \
     bun --version; test -x "$(command -v bunx)"; \
@@ -193,6 +194,6 @@ WORKDIR /home/${USERNAME}
 
 ENV SHELL=/usr/bin/zsh
 
-# tini as PID 1 → clean signal forwarding for interactive shells / training jobs
+# tini as PID 1 → clean signal forwarding for interactive shells / training
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["zsh", "-l"]

@@ -1,21 +1,21 @@
 # cluster-dev
 
-A reproducible Docker image for deep-learning development on GPU clusters.
+A reproducible Docker image for deep-learning development on GPU clusters. Each tool is installed by its **upstream-recommended** path (no ad-hoc curl-from-releases when the project ships an official Docker image).
 
 ## What's inside
 
-| Layer       | Content |
-|-------------|---------|
-| Base        | `nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04` (latest CUDA toolkit) |
-| Shell       | `zsh` as default (with `zsh-autosuggestions` + `zsh-syntax-highlighting`, sane `.zshrc`) |
-| Python      | `uv` + `uvx` (Astral) — interpreter, env & project manager |
-| JS / Node   | `bun` (+ `bunx`); `node` 22 LTS + `npm` as bun's fallback |
-| Multiplexer | `zellij` (default) and `tmux` (fallback, with `.tmux.conf`) |
-| Monitor     | `btop`, `htop` |
-| Disk        | `gdu` |
-| Files       | `yazi` (+ `ya`) |
-| Build       | `build-essential`, `cmake`, `ninja`, `git`, `git-lfs` |
-| QoL         | `ripgrep`, `fd`, `bat`, `jq`, `tree`, `vim` |
+| Tool                               | Install method (upstream-recommended)                          |
+|------------------------------------|----------------------------------------------------------------|
+| Base                               | `nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04`                   |
+| `uv` / `uvx`                       | `COPY --from=ghcr.io/astral-sh/uv:0.11.8` (Astral's distroless image) |
+| `bun` / `bunx`                     | `COPY --from=oven/bun:1-debian` (glibc-compatible variant)     |
+| `node` 22 LTS + `npm` + `npx`      | `COPY --from=node:22-bookworm-slim` (per nodejs/docker-node Best Practices) |
+| `btop`                             | upstream musl release tarball (`make install`, includes themes) |
+| `gdu`                              | upstream `_static` binary release                              |
+| `yazi` (+ `ya`)                    | upstream musl release zip                                       |
+| `zellij`                           | upstream musl release tarball                                   |
+| `tmux`, `zsh` (+ autosuggestions, syntax-highlighting), `htop` | Ubuntu apt |
+| Build / QoL                        | `build-essential`, `cmake`, `ninja-build`, `git`, `git-lfs`, `ripgrep`, `fd`, `bat`, `jq`, `tree`, `vim`, `nano` |
 
 The default user is `dev` (UID/GID 1000) with passwordless `sudo` and `zsh` as login shell. PID 1 is `tini` so signals (Ctrl-C, SIGTERM) propagate cleanly into long-running training jobs.
 
@@ -27,13 +27,18 @@ From this directory:
 docker buildx build -t cluster-dev:local .
 ```
 
-Override versions via build args:
+Override pinned upstream sources via build args:
 
 ```bash
 docker buildx build \
   --build-arg CUDA_VERSION=13.0.1 \
-  --build-arg UV_VERSION=0.5.18 \
-  --build-arg BUN_VERSION=1.1.42 \
+  --build-arg UV_VERSION=0.11.8 \
+  --build-arg BUN_TAG=1-debian \
+  --build-arg NODE_TAG=22-bookworm-slim \
+  --build-arg BTOP_VERSION=1.4.6 \
+  --build-arg GDU_VERSION=5.36.0 \
+  --build-arg YAZI_VERSION=26.1.22 \
+  --build-arg ZELLIJ_VERSION=0.44.1 \
   -t cluster-dev:local .
 ```
 
