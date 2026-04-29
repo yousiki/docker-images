@@ -19,6 +19,35 @@ A reproducible Docker image for deep-learning development on GPU clusters. Each 
 
 The default user is `dev` (UID/GID 1000) with passwordless `sudo` and `zsh` as login shell. PID 1 is `tini` so signals (Ctrl-C, SIGTERM) propagate cleanly into long-running training jobs.
 
+## `:base` — minimal smoke-test variant
+
+A second, intentionally-minimal image is published alongside the full one for
+diagnosing cluster pull/start failures (e.g. private-registry mirrors with
+limited egress, disk-pressure on the node, broken cluster networking).
+
+It contains **only**:
+
+- `nvidia/cuda:13.0.1-base-ubuntu24.04` (the lightweight `-base-` CUDA variant — no cuDNN, no devel toolchain)
+- `uv` / `uvx`
+- `bun` / `bunx`
+- `ca-certificates`
+
+Built from `Dockerfile.base` and published as:
+
+```
+ghcr.io/yousiki/cluster-dev:base
+ghcr.io/yousiki/cluster-dev:base-sha-<short>
+```
+
+Run it the same way:
+
+```bash
+docker run --rm -it --gpus all ghcr.io/yousiki/cluster-dev:base
+```
+
+If `:base` runs but `:latest` does not, the regression is in the dev tooling
+layer — not the CUDA base or the cluster's GPU runtime.
+
 ## Build locally
 
 From this directory:
@@ -70,12 +99,13 @@ to **`ghcr.io/yousiki/cluster-dev`** on:
 
 Pull requests build but do not push.
 
-Tags emitted by `docker/metadata-action`:
+Two variants are built in parallel via a workflow matrix:
 
-- `latest` — default branch
-- `<branch>` — branch refs
-- `<version>` — extracted from `cluster-dev/v<version>` tags
-- `sha-<short>` — every commit
-- `pr-<n>` — pull requests (built only, not pushed)
+| Variant | Dockerfile | Tags on `main` | Tags on commit / PR / branch / version |
+|---------|-----------|----------------|----------------------------------------|
+| Full    | `Dockerfile`      | `latest` | `sha-<short>`, `<branch>`, `pr-<n>`, `<version>` |
+| Base    | `Dockerfile.base` | `base`   | `base-sha-<short>`, `base-<branch>`, `base-pr-<n>`, `base-<version>` |
 
-GHA cache is scoped per-image (`scope=cluster-dev`) so other images in this repo don't compete for cache slots.
+`<version>` is extracted from `cluster-dev/v<version>` tags. Pull requests build but do not push.
+
+GHA cache is scoped per-variant (`scope=cluster-dev`, `scope=cluster-dev-base`) so the variants don't trash each other's cache.
