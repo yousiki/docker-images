@@ -1,0 +1,27 @@
+.git
+.github
+.gitignore
+.dockerignore
+README.md
+LICENSE
+docs/
+*.md
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv-cache/
+
+# Node
+node_modules/
+.bun/
+
+# Misc
+.DS_Store
