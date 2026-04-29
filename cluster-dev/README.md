@@ -90,14 +90,20 @@ docker run --rm -it --gpus all \
 
 ## CI / publishing
 
-`../.github/workflows/cluster-dev.yml` (at repo root) builds and pushes
-to **`ghcr.io/yousiki/cluster-dev`** on:
+`../.github/workflows/cluster-dev.yml` (at repo root) builds on:
 
 - push to `main` that touches `cluster-dev/**`
 - version tags matching `cluster-dev/v*` (e.g. `cluster-dev/v1.0.0` → `:1.0.0`)
 - manual `workflow_dispatch`
 
 Pull requests build but do not push.
+
+Images are pushed to **GHCR** (always) and **Docker Hub** (when `DOCKERHUB_USERNAME` repo variable is set — see [DOCKERHUB.md](./DOCKERHUB.md) for the one-time setup):
+
+```
+ghcr.io/yousiki/cluster-dev:<tag>
+docker.io/<DOCKERHUB_USERNAME>/cluster-dev:<tag>
+```
 
 Two variants are built in parallel via a workflow matrix:
 
