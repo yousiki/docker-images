@@ -88,25 +88,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Docker Hub login is conditional on the secret being set, so the
-      # workflow keeps working before the user has configured the secrets.
-      - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request' && vars.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.DOCKERHUB_REGISTRY }}
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Compute image tags / labels
+      - name: Compute image tags / labels (GHCR)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          # Push to both registries when DOCKERHUB_USERNAME is configured;
-          # otherwise GHCR only.
-          images: |
-            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/{1}/{2}', env.DOCKERHUB_REGISTRY, vars.DOCKERHUB_USERNAME, env.IMAGE_NAME) || '' }}
+          images: ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=${{ matrix.latest_value }},enable={{is_default_branch}}
             type=ref,event=branch,prefix=${{ matrix.tag_prefix }}
@@ -114,7 +100,12 @@ jobs:
             type=match,pattern=cluster-dev/v(.*),group=1,prefix=${{ matrix.tag_prefix }}
             type=sha,format=short,prefix=${{ matrix.tag_prefix }}sha-
 
-      - name: Build and push
+      # Build pushes to GHCR only. Docker Hub gets the same image via a
+      # separate regctl mirror step below — buildx's monolithic blob PUT is
+      # rejected by Docker Hub's CDN with `400 Bad request` for the large
+      # cudnn-devel layer; regctl uses chunked uploads which work for any
+      # blob size.
+      - name: Build and push to GHCR
         uses: docker/build-push-action@v6
         with:
           context: ./cluster-dev
@@ -127,11 +118,60 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
           provenance: false
 
-      - name: Summary
+      # ------------------------------------------------------------
+      # Mirror GHCR -> Docker Hub via regctl (chunked uploads).
+      # Skipped cleanly when DOCKERHUB_USERNAME is unset, so the workflow
+      # works before the user has configured the Docker Hub credentials.
+      # ------------------------------------------------------------
+      - name: Install regctl
+        if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) && vars.DOCKERHUB_USERNAME != ''
+        env:
+          REGCTL_VERSION: v0.7.2
+        run: |
+          set -euo pipefail
+          curl -fsSL -o regctl \
+            "https://github.com/regclient/regclient/releases/download/${REGCTL_VERSION}/regctl-linux-amd64"
+          chmod +x regctl
+          sudo mv regctl /usr/local/bin/regctl
+          regctl version
+
+      - name: Mirror GHCR -> Docker Hub
+        if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) && vars.DOCKERHUB_USERNAME != ''
+        env:
+          GHCR_TAGS: ${{ steps.meta.outputs.tags }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_PASS: ${{ secrets.GITHUB_TOKEN }}
+          DH_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          DH_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
+          DH_REPO: ${{ env.DOCKERHUB_REGISTRY }}/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          regctl registry login "${GHCR_REGISTRY}" -u "$GHCR_USER" -p "$GHCR_PASS"
+          regctl registry login "${DOCKERHUB_REGISTRY}" -u "$DH_USER" -p "$DH_PASS"
+
+          mirrored=()
+          while IFS= read -r ghcr_ref; do
+            [ -z "$ghcr_ref" ] && continue
+            tag="${ghcr_ref##*:}"
+            hub_ref="${DH_REPO}:${tag}"
+            echo "::group::Mirror $ghcr_ref -> $hub_ref"
+            regctl image copy "$ghcr_ref" "$hub_ref"
+            echo "::endgroup::"
+            mirrored+=("$hub_ref")
+          done <<< "$GHCR_TAGS"
+
+          {
+            echo "### ${{ matrix.variant }} — mirrored to Docker Hub"
+            echo '```'
+            printf '%s\n' "${mirrored[@]}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary (GHCR)
         if: steps.meta.outputs.tags != ''
         run: |
           {
-            echo "### ${{ matrix.variant }} — pushed tags"
+            echo "### ${{ matrix.variant }} — pushed to GHCR"
             echo '```'
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
