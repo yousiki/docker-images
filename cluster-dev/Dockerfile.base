@@ -1,0 +1,77 @@
+# syntax=docker.io/docker/dockerfile:1.7
+
+# ============================================================
+# cluster-dev:base — minimal smoke-test variant
+#
+# Contains ONLY:
+#   - CUDA base image (lightweight `-base-` variant, no cuDNN, no devel toolchain)
+#   - uv  (COPY from ghcr.io/astral-sh/uv)
+#   - bun (COPY from oven/bun:*-debian)
+#
+# Use case: when the full `cluster-dev` image won't pull or won't start on a
+# restricted GPU cluster (e.g. private registry mirrors, network egress limits,
+# disk pressure), pull `:base` first to isolate whether the problem is the
+# CUDA layer or the dev tooling on top.
+# ============================================================
+
+# ---- Base image ---------------------------------------------------------
+ARG CUDA_VERSION=13.0.1
+ARG UBUNTU_VERSION=24.04
+# `-base-` is the smallest CUDA variant (no cuDNN, no devel headers).
+ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION}
+
+# ---- Pinned upstream tool images (override with --build-arg) ------------
+ARG UV_VERSION=0.11.8
+ARG BUN_TAG=1-debian
+
+
+# ============================================================
+# Source stages — pinned upstream official images we COPY from
+# ============================================================
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-src
+FROM oven/bun:${BUN_TAG}                AS bun-src
+
+
+# ============================================================
+# Final image
+# ============================================================
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC
+
+LABEL org.opencontainers.image.title="cluster-dev-base" \
+      org.opencontainers.image.description="Minimal CUDA + uv + bun image for GPU clusters (smoke-test variant)" \
+      org.opencontainers.image.licenses="MIT"
+
+# ---- Minimum apt packages (TLS for uv/bun fetches, that's it) -----------
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+        ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---- uv (Astral's official pattern: COPY from distroless image) ---------
+COPY --from=uv-src /uv /uvx /usr/local/bin/
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+# ---- bun (COPY from oven/bun:*-debian; glibc-compatible) ----------------
+# bunx is a symlink to bun in the source image — docker COPY dereferences,
+# so we re-create the symlink here.
+COPY --from=bun-src /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
+ENV BUN_INSTALL=/usr/local
+
+# ---- Build-time sanity check (fails the build if any tool is broken) ----
+RUN set -eux; \
+    uv --version; uvx --version; \
+    bun --version; bunx --version
+
+WORKDIR /workspace
+
+CMD ["bash"]

@@ -34,9 +34,31 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Full image: CUDA-cudnn-devel + uv/bun/node + zellij/tmux + btop/gdu/yazi
+          - variant: full
+            dockerfile: cluster-dev/Dockerfile
+            cache_scope: cluster-dev
+            latest_value: latest
+            tag_prefix: ""
+            free_disk: true
+          # Minimal smoke-test image: CUDA-base + uv + bun
+          - variant: base
+            dockerfile: cluster-dev/Dockerfile.base
+            cache_scope: cluster-dev-base
+            latest_value: base
+            tag_prefix: "base-"
+            free_disk: false
+
     steps:
-      # GHA runners only have ~14GB free; CUDA devel + tooling exceeds that.
+      # GHA runners only have ~14GB free; CUDA-cudnn-devel + tooling exceeds
+      # that for the `full` variant. The `:base` variant is small enough that
+      # freeing disk just adds ~2 minutes for nothing.
       - name: Free runner disk space
+        if: matrix.free_disk
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -70,30 +92,30 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=match,pattern=cluster-dev/v(.*),group=1
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=short
+            type=raw,value=${{ matrix.latest_value }},enable={{is_default_branch}}
+            type=ref,event=branch,prefix=${{ matrix.tag_prefix }}
+            type=ref,event=pr,prefix=${{ matrix.tag_prefix }}
+            type=match,pattern=cluster-dev/v(.*),group=1,prefix=${{ matrix.tag_prefix }}
+            type=sha,format=short,prefix=${{ matrix.tag_prefix }}sha-
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: ./cluster-dev
-          file: ./cluster-dev/Dockerfile
+          file: ./${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=cluster-dev
-          cache-to: type=gha,mode=max,scope=cluster-dev
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
           provenance: false
 
       - name: Summary
         if: steps.meta.outputs.tags != ''
         run: |
           {
-            echo "### Pushed tags"
+            echo "### ${{ matrix.variant }} — pushed tags"
             echo '```'
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
