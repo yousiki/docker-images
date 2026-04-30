@@ -22,7 +22,7 @@ just adds the toolchain layers.
 |--------------------------------------------|---------------------------------------------------------------------------------|
 | `uv` / `uvx`                               | `COPY --from=ghcr.io/astral-sh/uv` (Astral's distroless image)                  |
 | `bun` / `bunx`                             | `COPY --from=oven/bun:1-debian` (glibc-compatible variant)                      |
-| `node` 22 LTS + `npm` + `npx`              | `COPY --from=node:22-bookworm-slim` (per nodejs/docker-node Best Practices)     |
+| `node` 24 LTS + `npm` + `npx`              | `COPY --from=node:24-bookworm-slim` (per nodejs/docker-node Best Practices)     |
 | `btop` / `gdu` / `yazi` / `zellij` / `starship` | upstream musl/static release tarballs, pinned via build args                |
 | `zsh` (+ autosuggestions, syntax-highlighting), `tmux`, `htop` | Ubuntu apt                                                  |
 | Build / QoL                                | `build-essential`, `cmake`, `ninja-build`, `git`, `git-lfs`, `ripgrep`, `fd`, `bat`, `jq`, `tree`, `vim`, `nano`, `zoxide`, `fzf` |
@@ -87,12 +87,12 @@ docker buildx build \
   --build-arg CUDA_VERSION=13.2.1 \
   --build-arg UV_VERSION=0.11.8 \
   --build-arg BUN_TAG=1-debian \
-  --build-arg NODE_TAG=22-bookworm-slim \
+  --build-arg NODE_TAG=24-bookworm-slim \
   --build-arg BTOP_VERSION=1.4.6 \
-  --build-arg GDU_VERSION=5.36.0 \
+  --build-arg GDU_VERSION=5.36.1 \
   --build-arg YAZI_VERSION=26.1.22 \
   --build-arg ZELLIJ_VERSION=0.44.1 \
-  --build-arg STARSHIP_VERSION=1.23.0 \
+  --build-arg STARSHIP_VERSION=1.25.0 \
   -f cluster-dev/Dockerfile \
   -t cluster-dev:local \
   ./cluster-dev

@@ -19,14 +19,14 @@ ARG BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION}
 # ---- Pinned upstream tool images (override with --build-arg) ------------
 ARG UV_VERSION=0.11.8
 ARG BUN_TAG=1-debian
-ARG NODE_TAG=22-bookworm-slim
+ARG NODE_TAG=24-bookworm-slim
 
 # ---- Pinned versions for tools fetched from GitHub releases -------------
 ARG BTOP_VERSION=1.4.6
-ARG GDU_VERSION=5.36.0
+ARG GDU_VERSION=5.36.1
 ARG YAZI_VERSION=26.1.22
 ARG ZELLIJ_VERSION=0.44.1
-ARG STARSHIP_VERSION=1.23.0
+ARG STARSHIP_VERSION=1.25.0
 
 
 # ============================================================
@@ -191,7 +191,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd \
  && ln -sf /usr/bin/batcat /usr/local/bin/bat
 
-# ---- Node.js + npm (COPY from node:22-bookworm-slim, recreate symlinks) -
+# ---- Node.js + npm (COPY from node:24-bookworm-slim, recreate symlinks) -
 COPY --from=node-src /usr/local/bin/node         /usr/local/bin/node
 COPY --from=node-src /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN set -eux; \
