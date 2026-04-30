@@ -3,18 +3,14 @@
 # ============================================================
 # cluster-dev:cpu — DL development image WITHOUT CUDA
 #
-# Same toolchain as the full `cluster-dev` image, but built on plain
-# Ubuntu instead of `nvidia/cuda:*-cudnn-devel`. Useful for:
+# Same toolchain as `cluster-dev:full`, but built on plain Ubuntu instead
+# of `nvidia/cuda:*-cudnn-devel`. Useful for:
 #   - debugging CPU-only workloads on a laptop / CI runner
 #   - smoke-testing scripts before booking a GPU node
 #   - pulling a much smaller image (no CUDA / cuDNN layers)
-#
-# Tooling install paths match `Dockerfile` exactly so behavior is
-# identical aside from the missing CUDA stack.
 # ============================================================
 
 # ---- Base image ---------------------------------------------------------
-# Match the Ubuntu version used by the GPU variant so userland is aligned.
 ARG UBUNTU_VERSION=24.04
 ARG BASE_IMAGE=ubuntu:${UBUNTU_VERSION}
 
@@ -28,6 +24,7 @@ ARG BTOP_VERSION=1.4.6
 ARG GDU_VERSION=5.36.0
 ARG YAZI_VERSION=26.1.22
 ARG ZELLIJ_VERSION=0.44.1
+ARG STARSHIP_VERSION=1.23.0
 
 
 # ============================================================
@@ -40,6 +37,7 @@ FROM node:${NODE_TAG}                   AS node-src
 
 # ============================================================
 # Downloader stage — for tools without an official Docker image
+# (kept in lockstep with Dockerfile so :cpu and :full agree on versions)
 # ============================================================
 FROM debian:bookworm-slim AS downloader
 
@@ -47,6 +45,8 @@ ARG BTOP_VERSION
 ARG GDU_VERSION
 ARG YAZI_VERSION
 ARG ZELLIJ_VERSION
+ARG STARSHIP_VERSION
+ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -60,36 +60,53 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /tmp/dl
 
-# btop — upstream musl release (themes/assets included via `make install`)
 RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) RUST_TRIPLE_ARCH=x86_64; GO_ARCH=amd64 ;; \
+      arm64) RUST_TRIPLE_ARCH=aarch64; GO_ARCH=arm64 ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}"; exit 1 ;; \
+    esac; \
+    printf 'export RUST_TRIPLE_ARCH=%s\nexport GO_ARCH=%s\n' \
+      "$RUST_TRIPLE_ARCH" "$GO_ARCH" > /tmp/arch.env
+
+RUN set -eux; . /tmp/arch.env; \
     curl -fsSL -o btop.tbz \
-      "https://github.com/aristocratos/btop/releases/download/v${BTOP_VERSION}/btop-x86_64-unknown-linux-musl.tbz"; \
+      "https://github.com/aristocratos/btop/releases/download/v${BTOP_VERSION}/btop-${RUST_TRIPLE_ARCH}-linux-musl.tbz"; \
     tar -xjf btop.tbz; \
     cd btop && PREFIX=/out/usr/local make install
 
-# gdu — single static binary
-RUN set -eux; \
+RUN set -eux; . /tmp/arch.env; \
     curl -fsSL -o gdu.tgz \
-      "https://github.com/dundee/gdu/releases/download/v${GDU_VERSION}/gdu_linux_amd64_static.tgz"; \
+      "https://github.com/dundee/gdu/releases/download/v${GDU_VERSION}/gdu_linux_${GO_ARCH}_static.tgz"; \
     tar -xzf gdu.tgz; \
-    install -Dm755 gdu_linux_amd64_static /out/usr/local/bin/gdu
+    install -Dm755 "gdu_linux_${GO_ARCH}_static" /out/usr/local/bin/gdu
 
-# yazi — extract `yazi` and `ya` from musl zip
-RUN set -eux; \
+RUN set -eux; . /tmp/arch.env; \
     curl -fsSL -o yazi.zip \
-      "https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-x86_64-unknown-linux-musl.zip"; \
+      "https://github.com/sxyazi/yazi/releases/download/v${YAZI_VERSION}/yazi-${RUST_TRIPLE_ARCH}-unknown-linux-musl.zip"; \
     mkdir -p /out/usr/local/bin; \
     unzip -j yazi.zip \
-        "yazi-x86_64-unknown-linux-musl/yazi" \
-        "yazi-x86_64-unknown-linux-musl/ya" \
+        "yazi-${RUST_TRIPLE_ARCH}-unknown-linux-musl/yazi" \
+        "yazi-${RUST_TRIPLE_ARCH}-unknown-linux-musl/ya" \
         -d /out/usr/local/bin/; \
     chmod 0755 /out/usr/local/bin/yazi /out/usr/local/bin/ya
 
-# zellij — single static musl binary
-RUN set -eux; \
+RUN set -eux; . /tmp/arch.env; \
     mkdir -p /out/usr/local/bin; \
-    curl -fsSL "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz" \
+    curl -fsSL "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-${RUST_TRIPLE_ARCH}-unknown-linux-musl.tar.gz" \
       | tar -xz -C /out/usr/local/bin zellij
+
+RUN set -eux; . /tmp/arch.env; \
+    mkdir -p /out/usr/local/bin; \
+    curl -fsSL "https://github.com/starship/starship/releases/download/v${STARSHIP_VERSION}/starship-${RUST_TRIPLE_ARCH}-unknown-linux-musl.tar.gz" \
+      | tar -xz -C /out/usr/local/bin starship
+
+RUN set -eux; \
+    mkdir -p /out/usr/local/share/btop/themes /out/usr/local/share/bat/themes; \
+    curl -fsSL https://github.com/catppuccin/btop/archive/refs/heads/main.tar.gz | tar -xz -C /tmp; \
+    cp /tmp/btop-main/themes/*.theme /out/usr/local/share/btop/themes/; \
+    curl -fsSL https://github.com/catppuccin/bat/archive/refs/heads/main.tar.gz | tar -xz -C /tmp; \
+    cp /tmp/bat-main/themes/*.tmTheme /out/usr/local/share/bat/themes/
 
 
 # ============================================================
@@ -109,7 +126,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 LABEL org.opencontainers.image.title="cluster-dev-cpu" \
-      org.opencontainers.image.description="DL development image without CUDA — Ubuntu + uv/bun/node + zellij/tmux + btop/gdu/yazi" \
+      org.opencontainers.image.description="CPU dev image — Ubuntu + uv/bun/node + zellij + btop/gdu/yazi/starship + zsh dotfiles" \
       org.opencontainers.image.licenses="MIT"
 
 # ---- System packages -----------------------------------------------------
@@ -118,22 +135,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-        # Core
         ca-certificates curl wget gnupg sudo tzdata tini \
-        # Build / dev
         build-essential pkg-config make cmake ninja-build \
         git git-lfs \
-        # Editors / utilities
         vim nano less file zip unzip xz-utils bzip2 \
-        # Networking
         openssh-client rsync \
-        # Python (uv manages its own; this is for system scripts)
         python3 python3-venv python3-pip \
-        # Shell + multiplexer + monitor
         zsh zsh-autosuggestions zsh-syntax-highlighting \
         tmux htop \
-        # QoL CLIs
         jq ripgrep fd-find bat tree man-db \
+        zoxide fzf \
  && rm -rf /var/lib/apt/lists/*
 
 RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd \
@@ -161,8 +172,8 @@ RUN set -eux; \
     npm config set fund false --global; \
     npm config set update-notifier false --global
 
-# ---- Tools from downloader stage (btop / gdu / yazi / zellij) -----------
-COPY --from=downloader /out/ /
+# ---- Tools + theme assets from downloader stage ------------------------
+COPY --from=downloader /out/usr/local/ /usr/local/
 
 # ---- Non-root user (Ubuntu 24.04 ships `ubuntu` at UID 1000) ------------
 RUN if id ubuntu >/dev/null 2>&1;        then userdel --remove ubuntu 2>/dev/null || userdel ubuntu; fi \
@@ -173,9 +184,25 @@ RUN if id ubuntu >/dev/null 2>&1;        then userdel --remove ubuntu 2>/dev/nul
  && chmod 0440 /etc/sudoers.d/${USERNAME} \
  && chsh -s /usr/bin/zsh root
 
-# ---- User dotfiles ------------------------------------------------------
-COPY --chown=${USERNAME}:${USERNAME} zshrc     /home/${USERNAME}/.zshrc
-COPY --chown=${USERNAME}:${USERNAME} tmux.conf /home/${USERNAME}/.tmux.conf
+# ---- Dotfiles (chezmoi-derived) ----------------------------------------
+COPY --chown=${USERNAME}:${USERNAME} configs/zprofile        /home/${USERNAME}/.zprofile
+COPY --chown=${USERNAME}:${USERNAME} configs/zshrc           /home/${USERNAME}/.zshrc
+COPY --chown=${USERNAME}:${USERNAME} configs/zsh/            /home/${USERNAME}/.config/zsh/
+COPY --chown=${USERNAME}:${USERNAME} configs/starship.toml   /home/${USERNAME}/.config/starship.toml
+COPY --chown=${USERNAME}:${USERNAME} configs/btop.conf       /home/${USERNAME}/.config/btop/btop.conf
+COPY --chown=${USERNAME}:${USERNAME} configs/bat.config      /home/${USERNAME}/.config/bat/config
+COPY --chown=${USERNAME}:${USERNAME} configs/zellij.kdl      /home/${USERNAME}/.config/zellij/config.kdl
+
+RUN set -eux; \
+    install -d -o ${USERNAME} -g ${USERNAME} \
+        /home/${USERNAME}/.config/btop/themes \
+        /home/${USERNAME}/.config/bat/themes; \
+    cp /usr/local/share/btop/themes/*.theme /home/${USERNAME}/.config/btop/themes/; \
+    cp /usr/local/share/bat/themes/*.tmTheme /home/${USERNAME}/.config/bat/themes/; \
+    chown -R ${USERNAME}:${USERNAME} \
+        /home/${USERNAME}/.config/btop/themes \
+        /home/${USERNAME}/.config/bat/themes; \
+    su ${USERNAME} -s /bin/bash -c 'bat cache --build' >/dev/null 2>&1 || true
 
 # ---- Build-time sanity check (fails the build if any tool is broken) ----
 RUN set -eux; \
@@ -186,7 +213,7 @@ RUN set -eux; \
     gdu --version; \
     yazi --version; ya --version; \
     zellij --version; \
-    tmux -V; \
+    starship --version; \
     zsh --version
 
 USER ${USERNAME}

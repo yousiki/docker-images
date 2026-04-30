@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+# ~/.zshrc — interactive entrypoint.
+# Loads ordered fragments from $ZSH_CONFIG_DIR — same shape as my chezmoi setup.
+
+case $- in
+  *i*) ;;
+  *) return ;;
+esac
+
+: "${XDG_CONFIG_HOME:=$HOME/.config}"
+export ZSH_CONFIG_DIR="${XDG_CONFIG_HOME}/zsh"
+
+typeset -a zsh_config_files=(
+  "$ZSH_CONFIG_DIR/10-base.zsh"
+  "$ZSH_CONFIG_DIR/20-tools.zsh"
+  "$ZSH_CONFIG_DIR/30-local.zsh"
+)
+
+for config_file in $zsh_config_files; do
+  [[ -r "$config_file" ]] && source "$config_file"
+done

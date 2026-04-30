@@ -1,0 +1,5 @@
+#!/usr/bin/env zsh
+# ~/.zprofile — login shell environment.
+# Mirrors the chezmoi dotfiles, trimmed for a Docker image (no Homebrew/OrbStack).
+
+export PATH="$HOME/.local/bin:$PATH"
