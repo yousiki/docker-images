@@ -71,7 +71,7 @@ RUN set -eux; \
 
 RUN set -eux; . /tmp/arch.env; \
     curl -fsSL -o btop.tbz \
-      "https://github.com/aristocratos/btop/releases/download/v${BTOP_VERSION}/btop-${RUST_TRIPLE_ARCH}-linux-musl.tbz"; \
+      "https://github.com/aristocratos/btop/releases/download/v${BTOP_VERSION}/btop-${RUST_TRIPLE_ARCH}-unknown-linux-musl.tbz"; \
     tar -xjf btop.tbz; \
     cd btop && PREFIX=/out/usr/local make install
 
