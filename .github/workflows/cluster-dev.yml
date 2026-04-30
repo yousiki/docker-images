@@ -40,32 +40,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Full image: CUDA-cudnn-devel + uv/bun/node + zellij/tmux + btop/gdu/yazi
-          - variant: full
-            dockerfile: cluster-dev/Dockerfile
-            cache_scope: cluster-dev
-            latest_value: latest
-            tag_prefix: ""
-            free_disk: true
-          # Minimal smoke-test image: CUDA-base + uv + bun
+          # GPU base: CUDA cuDNN devel + uv + bun (only).
+          # Built as the `base` target of cluster-dev/Dockerfile so it stays
+          # bit-identical to the lower layers of `full`.
           - variant: base
-            dockerfile: cluster-dev/Dockerfile.base
+            dockerfile: cluster-dev/Dockerfile
+            target: base
             cache_scope: cluster-dev-base
             latest_value: base
             tag_prefix: "base-"
-            free_disk: false
-          # CPU-only image: full toolchain on plain Ubuntu (no CUDA)
+            free_disk: true
+          # GPU full: base + dev toolchain (node, btop, gdu, yazi, zellij,
+          # starship, zsh dotfiles, etc.).
+          - variant: full
+            dockerfile: cluster-dev/Dockerfile
+            target: full
+            cache_scope: cluster-dev-full
+            latest_value: latest
+            tag_prefix: ""
+            free_disk: true
+          # CPU: full toolchain on plain Ubuntu (no CUDA).
           - variant: cpu
             dockerfile: cluster-dev/Dockerfile.cpu
+            target: ""
             cache_scope: cluster-dev-cpu
             latest_value: cpu
             tag_prefix: "cpu-"
             free_disk: false
 
     steps:
-      # GHA runners only have ~14GB free; CUDA-cudnn-devel + tooling exceeds
-      # that for the `full` variant. The `:base` variant is small enough that
-      # freeing disk just adds ~2 minutes for nothing.
+      # GHA runners only have ~14GB free; the GPU variants pull in CUDA
+      # cuDNN-devel which exceeds that without aggressive cleanup. CPU is
+      # small enough that freeing disk just adds ~2 minutes for nothing.
       - name: Free runner disk space
         if: matrix.free_disk
         uses: jlumbroso/free-disk-space@main
@@ -117,6 +123,7 @@ jobs:
         with:
           context: ./cluster-dev
           file: ./${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
           tags: ${{ steps.meta.outputs.tags }}
